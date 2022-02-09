@@ -1,7 +1,7 @@
 local helpers = require "spec.helpers"
+local socket = require "socket"
 
-
-local PLUGIN_NAME = "myplugin"
+local PLUGIN_NAME = "tcp-plugin"
 
 
 for _, strategy in helpers.all_strategies() do
@@ -12,16 +12,27 @@ for _, strategy in helpers.all_strategies() do
 
       local bp = helpers.get_db_utils(strategy == "off" and "postgres" or strategy, nil, { PLUGIN_NAME })
 
+      local service1 = bp.services:insert({
+        protocol = "tcp",
+        host = "127.0.0.1",
+        port = 15557
+      })
+
       -- Inject a test route. No need to create a service, there is a default
       -- service which will echo the request.
       local route1 = bp.routes:insert({
-        hosts = { "test1.com" },
+        service = {id = service1.id },
+        protocols = {"tcp"},
+        sources = {
+          {ip = "127.0.0.1"}
+        }
       })
       -- add the plugin to test to the route we created
       bp.plugins:insert {
         name = PLUGIN_NAME,
         route = { id = route1.id },
         config = {},
+        protocols = {"tcp"}
       }
 
       -- start kong
@@ -32,6 +43,7 @@ for _, strategy in helpers.all_strategies() do
         nginx_conf = "spec/fixtures/custom_nginx.template",
         -- make sure our plugin gets loaded
         plugins = "bundled," .. PLUGIN_NAME,
+        stream_listen = "0.0.0.0:7878",
         -- write & load declarative config, only if 'strategy=off'
         declarative_config = strategy == "off" and helpers.make_yaml_file() or nil,
       }))
@@ -50,40 +62,20 @@ for _, strategy in helpers.all_strategies() do
     end)
 
 
-
+    -- currently doesn't work
     describe("request", function()
-      it("gets a 'hello-world' header", function()
-        local r = client:get("/request", {
-          headers = {
-            host = "test1.com"
-          }
-        })
-        -- validate that the request succeeded, response status 200
-        assert.response(r).has.status(200)
-        -- now check the request (as echoed by mockbin) to have the header
-        local header_value = assert.request(r).has.header("hello-world")
-        -- validate the value of that header
-        assert.equal("this is on a request", header_value)
+      it("tcp stuff", function()
+
+        local c = assert(socket.connect("127.0.0.1",7878))
+        local index, err, i = c:send("hello\n")
+        c:send("hello\n")
+        c:send("hello\n")
+        c:close()
+
+        -- assert something
       end)
     end)
 
-
-
-    describe("response", function()
-      it("gets a 'bye-world' header", function()
-        local r = client:get("/request", {
-          headers = {
-            host = "test1.com"
-          }
-        })
-        -- validate that the request succeeded, response status 200
-        assert.response(r).has.status(200)
-        -- now check the response to have the header
-        local header_value = assert.response(r).has.header("bye-world")
-        -- validate the value of that header
-        assert.equal("this is on the response", header_value)
-      end)
-    end)
 
   end)
 end
